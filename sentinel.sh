@@ -3,11 +3,10 @@
 # --- CONFIGURATION ---
 VPN_PATH="$HOME/Documents/THM.ovpn"
 WRITEUP_BASE="$HOME/Documents/GitHub/Bosanac-Writeups/TryHackMe"
-NOTES_PATH="$HOME/Documents/GitHub/Pentesting-DB/Writeups"
+WORDLIST="~/Desktop/wordlists/dirb/common.txt"
 SESSION="sentinel"
 
-# --- INPUTS ---
-echo "--- Bosatek Sentinel Tactical Launch ---"
+echo "--- Bosatek Sentinel Modular Launch ---"
 read -p "Target IP: " TARGET_IP
 read -p "Room Name: " ROOM_NAME
 
@@ -16,42 +15,43 @@ ROOM_DIR="$WRITEUP_BASE/$ROOM_NAME"
 mkdir -p "$ROOM_DIR/nmap" "$ROOM_DIR/ffuf"
 cd "$ROOM_DIR"
 
-# --- START TMUX SESSION ---
-# Create session and hide the status bar for a clean look
-tmux new-session -d -s $SESSION -n "Dashboard"
+# --- LAUNCH TMUX ---
+tmux new-session -d -s $SESSION -n "Master-Control"
+tmux set-option -g mouse on
 
-# Pane 0: Master Control / Active Shell (Left)
-tmux send-keys -t $SESSION:0.0 "export IP=$TARGET_IP; clear; echo 'Target: $TARGET_IP'" C-m
+# ==========================================
+# TAB 1: MASTER CONTROL (Splits)
+# ==========================================
+# Left Pane (0.0): Active Shell
+tmux send-keys -t $SESSION:0 "export IP=$TARGET_IP; clear; echo 'System Ready. Target: $TARGET_IP'" C-m
 
-# Pane 1: VPN (Top Right)
+# Right Top Pane (0.1): RustScan
 tmux split-window -h -t $SESSION:0
-tmux send-keys -t $SESSION:0.1 "sudo openvpn $VPN_PATH" C-m
+tmux send-keys -t $SESSION:0.1 "rustscan -a $TARGET_IP -- -A -sC -oN nmap/initial.txt" C-m
 
-# Pane 2: Tactical AI (Bottom Right)
+# Right Bottom Pane (0.2): FFUF (Your custom command)
 tmux split-window -v -t $SESSION:0.1
-tmux send-keys -t $SESSION:0.2 "ollama run bosatek-sentinel" C-m
+tmux send-keys -t $SESSION:0.2 "ffuf -w $WORDLIST -u http://$TARGET_IP/FUZZ -e .php,.html,.txt -t 100 -o ffuf/hits.json" C-m
 
-# Pane 3: The Recon/Wordlist Menu (Bottom Left)
-tmux split-window -v -t $SESSION:0.0
-tmux send-keys -t $SESSION:0.3 "echo 'Select Wordlist for FFUF:'; 
-select wl in 'Common' 'Raft-Medium' 'Pentesting-DB-Custom'; do
-  case \$wl in
-    'Common') WORDLIST='/usr/share/wordlists/dirb/common.txt'; break;;
-    'Raft-Medium') WORDLIST='/usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt'; break;;
-    'Pentesting-DB-Custom') WORDLIST='$HOME/Documents/GitHub/Pentesting-DB/Main/FFUF/custom.txt'; break;;
-  esac
-done; 
-ffuf -w \$WORDLIST -u http://$TARGET_IP/FUZZ -o ffuf/hits.json" C-m
+# ==========================================
+# TAB 2: SENTINEL-AI (Full Screen)
+# ==========================================
+tmux new-window -t $SESSION -n "Sentinel-AI"
+tmux send-keys -t $SESSION:1 "ollama run bosatek-sentinel" C-m
 
-# --- THE AUTO-BURP MONITOR (New Window) ---
-tmux new-window -t $SESSION -n "Auto-Burp"
-tmux send-keys -t $SESSION:1 "while true; do 
-  if [ -f ffuf/hits.json ]; then
-    cat ffuf/hits.json | jq -r '.results[] | .url' | xargs -I {} burpsuite --open-url {}
-  fi
-  sleep 30
-done" C-m
+# ==========================================
+# TAB 3: NETWORK & BURP PRO (Splits)
+# ==========================================
+tmux new-window -t $SESSION -n "Net-Burp"
 
-# Attach to the session
+# Left Pane: VPN (Using the new NOPASSWD trick)
+tmux send-keys -t $SESSION:2 "sudo openvpn $VPN_PATH" C-m
+
+# Right Pane: Burp Pro Project Auto-Open
+tmux split-window -h -t $SESSION:2
+tmux send-keys -t $SESSION:2.1 "echo 'Waiting for FFUF hits to send to Burp Pro...'; while true; do sleep 10; done" C-m
+
+# Attach to Tab 1, Pane 0 (Your active shell)
 tmux select-window -t $SESSION:0
+tmux select-pane -t $SESSION:0.0
 tmux attach-session -t $SESSION
