@@ -1,57 +1,97 @@
 #!/bin/bash
+# ============================================================
+#        BOSATEK SENTINEL - MODULAR LAUNCHER
+# ============================================================
 
-# --- CONFIGURATION ---
-VPN_PATH="$HOME/Documents/THM.ovpn"
-WRITEUP_BASE="$HOME/Documents/GitHub/Bosanac-Writeups/TryHackMe"
-WORDLIST="~/Desktop/wordlists/dirb/common.txt"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SESSION="sentinel"
 
-echo "--- Bosatek Sentinel Modular Launch ---"
-read -p "Target IP: " TARGET_IP
-read -p "Room Name: " ROOM_NAME
+echo ""
+echo "=========================================="
+echo "      BOSATEK SENTINEL - MODULAR LAUNCHER"
+echo "=========================================="
+echo ""
 
-# --- PREP ENVIRONMENT ---
-ROOM_DIR="$WRITEUP_BASE/$ROOM_NAME"
-mkdir -p "$ROOM_DIR/nmap" "$ROOM_DIR/ffuf"
-cd "$ROOM_DIR"
+# --- USER INPUT ---
+read -p "  Target IP?  " TARGET_IP
+read -p "  Room Name?  " ROOM_NAME
 
-# --- LAUNCH TMUX ---
-tmux new-session -d -s $SESSION -n "Master-Control"
-tmux set-option -g mouse on
+echo ""
+echo "  Platform:"
+echo "    1) TryHackMe"
+echo "    2) HackTheBox"
+echo "    3) Custom"
+echo ""
+read -p "  Platform (1/2/3): " PLATFORM_CHOICE
 
-# ==========================================
-# TAB 1: MASTER CONTROL (Splits)
-# ==========================================
-# Left Pane (0.0): Active Shell
-tmux send-keys -t $SESSION:0 "export IP=$TARGET_IP; clear; echo 'System Ready. Target: $TARGET_IP'" C-m
+case "$PLATFORM_CHOICE" in
+    1) PLATFORM="TryHackMe" ;;
+    2) PLATFORM="HackTheBox" ;;
+    3) PLATFORM="Custom" ;;
+    *)
+        echo "  [!] Invalid choice. Defaulting to TryHackMe."
+        PLATFORM="TryHackMe"
+        ;;
+esac
 
-# Right Top Pane (0.1): RustScan
-tmux split-window -h -t $SESSION:0
-tmux send-keys -t $SESSION:0.1 "rustscan -a $TARGET_IP -- -A -sC -oN nmap/initial.txt" C-m
+# --- PATHS ---
+ROOM_DIR="$HOME/Documents/GitHub/Bosanac-Writeups/$PLATFORM/$ROOM_NAME"
 
-# Right Bottom Pane (0.2): FFUF (Your custom command)
-tmux split-window -v -t $SESSION:0.1
-tmux send-keys -t $SESSION:0.2 "ffuf -w $WORDLIST -u http://$TARGET_IP/FUZZ -e .php,.html,.txt -t 100 -o ffuf/hits.json" C-m
+echo ""
+echo "  [+] Platform  : $PLATFORM"
+echo "  [+] Room Dir  : $ROOM_DIR"
+echo "  [+] Target IP : $TARGET_IP"
+echo ""
 
-# ==========================================
-# TAB 2: SENTINEL-AI (Full Screen)
-# ==========================================
-tmux new-window -t $SESSION -n "Sentinel-AI"
-tmux send-keys -t $SESSION:1 "ollama run bosatek-sentinel" C-m
+# --- CREATE DIRECTORY STRUCTURE ---
+mkdir -p "$ROOM_DIR"/{nmap,ffuf,burp}
+echo "  [+] Workspace directories created."
 
-# ==========================================
-# TAB 3: NETWORK & BURP PRO (Splits)
-# ==========================================
-tmux new-window -t $SESSION -n "Net-Burp"
+# --- KILL EXISTING SESSION ---
+tmux kill-session -t "$SESSION" 2>/dev/null
 
-# Left Pane: VPN (Using the new NOPASSWD trick)
-tmux send-keys -t $SESSION:2 "sudo openvpn $VPN_PATH" C-m
+# ============================================================
+# TMUX SESSION SETUP
+# ============================================================
 
-# Right Pane: Burp Pro Project Auto-Open
-tmux split-window -h -t $SESSION:2
-tmux send-keys -t $SESSION:2.1 "echo 'Waiting for FFUF hits to send to Burp Pro...'; while true; do sleep 10; done" C-m
+# Tab 1: [Recon] - Horizontal split (top: scan, bottom: ffuf)
+tmux new-session -d -s "$SESSION" -n "Recon"
+tmux set-option -t "$SESSION" -g mouse on
 
-# Attach to Tab 1, Pane 0 (Your active shell)
-tmux select-window -t $SESSION:0
-tmux select-pane -t $SESSION:0.0
-tmux attach-session -t $SESSION
+# Top pane: RustScan -> Nmap
+tmux send-keys -t "$SESSION:Recon" \
+    "bash \"$SCRIPT_DIR/modules/recon.sh\" scan \"$TARGET_IP\" \"$ROOM_DIR\"" C-m
+
+# Bottom pane: FFUF
+tmux split-window -v -t "$SESSION:Recon"
+tmux send-keys -t "$SESSION:Recon.1" \
+    "bash \"$SCRIPT_DIR/modules/recon.sh\" ffuf \"$TARGET_IP\" \"$ROOM_DIR\"" C-m
+
+# Tab 2: [Sentinel-AI] - Full screen Ollama
+tmux new-window -t "$SESSION" -n "Sentinel-AI"
+tmux send-keys -t "$SESSION:Sentinel-AI" \
+    "bash \"$SCRIPT_DIR/modules/ai.sh\"" C-m
+
+# Tab 3: [Net-Burp] - Vertical split (left: VPN, right: Burp Pro)
+tmux new-window -t "$SESSION" -n "Net-Burp"
+
+# Left pane: OpenVPN
+tmux send-keys -t "$SESSION:Net-Burp" \
+    "bash \"$SCRIPT_DIR/modules/network.sh\" vpn" C-m
+
+# Right pane: Burp Pro
+tmux split-window -h -t "$SESSION:Net-Burp"
+tmux send-keys -t "$SESSION:Net-Burp.1" \
+    "bash \"$SCRIPT_DIR/modules/network.sh\" burp \"$ROOM_DIR\" \"$ROOM_NAME\"" C-m
+
+# --- FOCUS: Tab 1, Top Pane ---
+tmux select-window -t "$SESSION:Recon"
+tmux select-pane -t "$SESSION:Recon.0"
+
+echo "  [+] Tmux session '$SESSION' ready."
+echo "  [+] Tabs: [Recon] | [Sentinel-AI] | [Net-Burp]"
+echo "  [+] Mouse mode: ON"
+echo ""
+echo "  Attaching..."
+echo ""
+tmux attach-session -t "$SESSION"
