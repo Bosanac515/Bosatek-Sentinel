@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# BOSATEK SENTINEL V3
+# BOSATEK SENTINEL V3 — MASTER CONTROL
 # Main launcher — Master Menu + Tmux workspace
 # ============================================================
 
@@ -13,6 +13,7 @@ SESSION="sentinel"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- COLORS ---
+GOLD='\033[1;33m'
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -25,15 +26,15 @@ RESET='\033[0m'
 # ============================================================
 master_menu() {
     clear
-    echo -e "${CYAN}${BOLD}"
-    echo "  ╔══════════════════════════════════════════╗"
-    echo "  ║        BOSATEK SENTINEL V3               ║"
-    echo "  ║        Tactical Recon Framework          ║"
-    echo "  ╚══════════════════════════════════════════╝"
+    echo -e "${GOLD}${BOLD}"
+    echo "  ╔══════════════════════════════════════════════╗"
+    echo "  ║    BOSATEK SENTINEL V3 — MASTER CONTROL     ║"
+    echo "  ║    Tactical Recon Framework                  ║"
+    echo "  ╚══════════════════════════════════════════════╝"
     echo -e "${RESET}"
     echo -e "  ${GREEN}[1]${RESET} New Engagement"
     echo -e "  ${GREEN}[2]${RESET} Resume Session"
-    echo -e "  ${YELLOW}[3]${RESET} Tool Test  (Volatile — no VPN, no saved output)"
+    echo -e "  ${YELLOW}[3]${RESET} Tool Test  (Volatile — date-stamped, VPN optional)"
     echo -e "  ${RED}[4]${RESET} Save & Exit"
     echo ""
     read -p "  Select option [1-4]: " CHOICE
@@ -62,12 +63,10 @@ new_engagement() {
 
     ROOM_DIR="$WRITEUP_BASE/$ROOM_NAME"
     mkdir -p "$ROOM_DIR/nmap" "$ROOM_DIR/ffuf" "$ROOM_DIR/logs"
-
-    # Pre-create Burp project directory
     mkdir -p "$BURP_BASE/$ROOM_NAME"
 
-    echo -e "${GREEN}[*] Launching V3 workspace for: $ROOM_NAME ($TARGET_IP)${RESET}"
-    launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 0
+    echo -e "${GOLD}[*] Launching workspace for: $ROOM_NAME ($TARGET_IP)${RESET}"
+    launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 0 1
 }
 
 # ============================================================
@@ -91,33 +90,34 @@ resume_session() {
         sleep 2; master_menu; return
     fi
 
-    # Ensure Burp project directory exists for resume
     mkdir -p "$BURP_BASE/$ROOM_NAME"
 
-    launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 0
+    launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 0 1
 }
 
 # ============================================================
-# OPTION 3: TOOL TEST — Volatile, no VPN, stays on Control tab
+# OPTION 3: TOOL TEST — Volatile, date-stamped, VPN optional
 # ============================================================
 tool_test() {
     echo ""
     echo -e "${YELLOW}[!] TOOL TEST MODE${RESET}"
-    echo -e "    • Output is volatile — nothing saved to disk"
-    echo -e "    • VPN module is skipped"
-    echo -e "    • Burp launches with a volatile project file"
-    echo -e "    • Dashboard stays on Tab 1 (Control)"
+    echo -e "    • Output is volatile — nothing saved permanently"
+    echo -e "    • Room auto-named with timestamp"
     echo ""
     read -p "  Target IP (test): " TARGET_IP
 
-    ROOM_NAME="VOLATILE_$(date +%s)"
+    # Date-stamped ROOM_NAME as requested
+    ROOM_NAME="TEST_$(date +%Y%m%d_%H%M)"
     ROOM_DIR="/tmp/$ROOM_NAME"
     mkdir -p "$ROOM_DIR/nmap" "$ROOM_DIR/ffuf" "$ROOM_DIR/logs"
-
-    # Burp project dir still created under BURP_BASE for consistency
     mkdir -p "$BURP_BASE/$ROOM_NAME"
 
-    launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 1
+    echo ""
+    read -p "  Connect VPN? (y/n): " VPN_CHOICE
+    local USE_VPN=0
+    [[ "$VPN_CHOICE" =~ ^[Yy]$ ]] && USE_VPN=1
+
+    launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 1 "$USE_VPN"
 }
 
 # ============================================================
@@ -136,130 +136,100 @@ save_and_exit() {
     else
         echo -e "${YELLOW}[*] No active session to close.${RESET}"
     fi
-    echo -e "${CYAN}[*] Bosatek Sentinel V3 — goodbye.${RESET}"
+    echo -e "${GOLD}[*] Bosatek Sentinel V3 — goodbye.${RESET}"
     exit 0
 }
 
 # ============================================================
-# BURP PRO LAUNCHER
-# launch_burp <ROOM_NAME> [VOLATILE 0|1]
-#
-# Burp auto-creates a NEW .burp file for new rooms, or
-# REOPENS the existing file when resuming — same command either way.
-# Directory is always pre-created before this is called.
-# ============================================================
-launch_burp() {
-    local ROOM_NAME="$1"
-    local VOLATILE="${2:-0}"
-    local BURP_PROJECT="$BURP_BASE/$ROOM_NAME/$ROOM_NAME.burp"
-
-    echo "[*] Burp Suite Pro — project: $BURP_PROJECT"
-    echo "[*] Launching..."
-    echo ""
-
-    if command -v burpsuite &>/dev/null; then
-        burpsuite --project-file="$BURP_PROJECT" 2>/dev/null
-    elif [[ -f /usr/bin/burpsuite ]]; then
-        /usr/bin/burpsuite --project-file="$BURP_PROJECT" 2>/dev/null
-    elif [[ -f "$HOME/BurpSuitePro/burpsuite_pro.jar" ]]; then
-        java -jar "$HOME/BurpSuitePro/burpsuite_pro.jar" \
-            --project-file="$BURP_PROJECT" 2>/dev/null
-    else
-        echo "[!] Burp Suite Pro not found."
-        echo "[!] Install it or check PATH. Project file would be:"
-        echo "    $BURP_PROJECT"
-        echo ""
-        echo "[*] Press Enter to keep this pane available."
-        read -r
-    fi
-}
-
-# ============================================================
 # TMUX WORKSPACE LAUNCHER
-# launch_tmux <TARGET_IP> <ROOM_NAME> <ROOM_DIR> <VOLATILE 0|1>
+# launch_tmux <TARGET_IP> <ROOM_NAME> <ROOM_DIR> <VOLATILE 0|1> <USE_VPN 0|1>
 #
-# ┌─────────────────────────────────────────────────────────┐
-# │  TAB 1: Control                                         │
-# │  ┌──────────────┬──────────────┐                        │
-# │  │              │  Pane 1      │                        │
-# │  │   Pane 0     │  (RustScan)  │                        │
-# │  │   MASTER     ├──────────────┤                        │
-# │  │   TERMINAL   │  Pane 2      │                        │
-# │  │  (focused)   │  (FFUF)      │                        │
-# │  └──────────────┴──────────────┘                        │
-# │  TAB 2: AI-Brain                                        │
-# │  TAB 3: Network  (VPN | wait_for_vpn | Burp Pro)        │
-# │  TAB 4: Monitor  (summary.log | checklist.md)           │
-# └─────────────────────────────────────────────────────────┘
+# ┌──────────────────────────────────────────────────────────┐
+# │  TAB 1: Control                                          │
+# │  ┌───────────────────┬───────────────┐                   │
+# │  │                   │  Pane 1       │                   │
+# │  │   Pane 0  (55%)   │  (RustScan)   │                   │
+# │  │   MASTER TERMINAL ├───────────────┤                   │
+# │  │   Clean Zsh       │  Pane 2       │                   │
+# │  │   ← FOCUSED       │  (FFUF)       │                   │
+# │  └───────────────────┴───────────────┘                   │
+# │  TAB 2: AI-Brain  (ollama | ai_brain_loop)               │
+# │  TAB 3: Network   (VPN | wait_for_vpn | Burp Pro)        │
+# │  TAB 4: Monitor   (summary.log | checklist.md)           │
+# └──────────────────────────────────────────────────────────┘
 # ============================================================
 launch_tmux() {
     local TARGET_IP="$1"
     local ROOM_NAME="$2"
     local ROOM_DIR="$3"
     local VOLATILE="$4"
+    local USE_VPN="$5"
     local BURP_PROJECT="$BURP_BASE/$ROOM_NAME/$ROOM_NAME.burp"
 
     tmux kill-session -t "$SESSION" 2>/dev/null
 
     # ----------------------------------------------------------
-    # Global tmux options — applied at server level
+    # TMUX OPTIONS — server-level settings applied cleanly
     # ----------------------------------------------------------
     tmux start-server 2>/dev/null || true
 
-    # Prefix: Ctrl+a  (unbind default Ctrl+b)
-    tmux set-option -gs prefix C-a
-    tmux set-option -gs prefix2 None
-    tmux bind-key -T prefix C-a send-prefix
+    # Prefix: Ctrl+a
+    # bind C-a send-prefix → double-tap C-a passes literal C-a to app
+    tmux set -g prefix C-a
+    tmux unbind C-b
+    tmux bind C-a send-prefix
 
-    # Mouse + vi copy-mode + system clipboard via xclip
-    tmux set-option -gs mouse on
-    tmux set-option -s  set-clipboard on
-    tmux set-option -gs mode-keys vi
-    tmux bind-key -T copy-mode-vi MouseDragEnd1Pane \
-        send-keys -X copy-pipe-and-cancel "xclip -se c -i"
+    # Mouse on — NO custom MouseDrag bindings (restores right-click menu)
+    tmux set -g mouse on
+
+    # Unbind tmux's default right-click menu so the terminal emulator
+    # receives the right-click and shows the standard Kali context menu
+    tmux unbind-key -T root MouseDown3Pane
+
+    # Clipboard: on without custom drag bindings (use Shift+drag for xclip)
+    tmux set -s set-clipboard on
+
+    # Status bar — gold theme
+    tmux set -g status-bg colour235
+    tmux set -g status-fg colour220
+    tmux set -g status-left  "#[fg=colour220,bold] SENTINEL V3 #[fg=colour250]| "
+    tmux set -g status-right "#[fg=colour220] $ROOM_NAME #[fg=colour250]| %H:%M "
 
     # ----------------------------------------------------------
     # TAB 1: Control — 3-pane layout
-    #
-    #   Pane 0  Left  (55%)   : Master Terminal — FOCUSED, interactive
-    #   Pane 1  Top-Right     : RustScan / Nmap output
-    #   Pane 2  Bottom-Right  : FFUF (-s -mc 200,301,302) output
+    #   Pane 0  Left  (55%) : Master Terminal — clean Zsh, FOCUSED
+    #   Pane 1  Top-Right   : RustScan / Nmap
+    #   Pane 2  Bottom-Right: FFUF  (-s -ic -mc 200,301,302)
     # ----------------------------------------------------------
     tmux new-session -d -s "$SESSION" -n "Control"
 
-    # Status bar
-    tmux set-option -g -t "$SESSION" status-bg colour235
-    tmux set-option -g -t "$SESSION" status-fg colour250
-    tmux set-option -g -t "$SESSION" status-left  "#[fg=colour46,bold] SENTINEL V3 #[fg=colour250]| "
-    tmux set-option -g -t "$SESSION" status-right "#[fg=colour220] $ROOM_NAME #[fg=colour250]| %H:%M "
-
-    # Pane 0 — Master Terminal (left, full height)
+    # Pane 0: export env vars, print gold banner, leave at clean prompt
     tmux send-keys -t "$SESSION:Control.0" \
         "export IP='$TARGET_IP' ROOM='$ROOM_NAME' ROOM_DIR='$ROOM_DIR' VOLATILE=$VOLATILE WORDLIST='$WORDLIST'; clear" C-m
     tmux send-keys -t "$SESSION:Control.0" \
-        "echo ''; echo '  ╔════════════════════════════════╗'; echo '  ║  BOSATEK SENTINEL V3           ║'; echo '  ║  Master Terminal               ║'; echo '  ╚════════════════════════════════╝'; echo ''; echo \"  Target : \$IP\"; echo \"  Room   : \$ROOM\"; echo \"  Dir    : \$ROOM_DIR\"; echo ''" C-m
+        "printf '\033[1;33m  ╔══════════════════════════════════════════════╗\n  ║    BOSATEK SENTINEL V3 — MASTER CONTROL     ║\n  ╚══════════════════════════════════════════════╝\033[0m\n\n  \033[0;32mTarget :\033[0m \$IP\n  \033[0;32mRoom   :\033[0m \$ROOM\n  \033[0;32mDir    :\033[0m \$ROOM_DIR\n'" C-m
 
-    # Split right column (Pane 1 — takes 45% width)
+    # Split right column (45% width) — this becomes the recon column
     tmux split-window -h -t "$SESSION:Control.0" -p 45
 
-    # Split right column vertically → Pane 1 (top) + Pane 2 (bottom)
+    # Split right column in half vertically → Pane 1 (top) + Pane 2 (bottom)
     tmux split-window -v -t "$SESSION:Control.1" -p 50
 
     # Pane 1 — Top-Right: RustScan / Nmap
     tmux send-keys -t "$SESSION:Control.1" \
         "source '$SCRIPT_DIR/modules/recon.sh' && run_nmap '$TARGET_IP' '$ROOM_DIR' $VOLATILE" C-m
 
-    # Pane 2 — Bottom-Right: FFUF silent, match 200/301/302
+    # Pane 2 — Bottom-Right: FFUF
     tmux send-keys -t "$SESSION:Control.2" \
         "source '$SCRIPT_DIR/modules/recon.sh' && run_ffuf '$TARGET_IP' '$ROOM_DIR' $VOLATILE" C-m
 
-    # Return focus to Pane 0 — user has a live shell here
+    # Return focus to Pane 0 — clean Zsh prompt, user can type immediately
     tmux select-pane -t "$SESSION:Control.0"
 
     # ----------------------------------------------------------
-    # TAB 2: AI-Brain
-    #   Top  : ollama interactive model
-    #   Bottom : background summary.log watcher → checklist.md
+    # TAB 2: AI-Brain  (PRESERVED — do not modify)
+    #   Top    : ollama interactive model
+    #   Bottom : ai_brain_loop — watches summary.log, updates checklist.md
     # ----------------------------------------------------------
     tmux new-window -t "$SESSION" -n "AI-Brain"
     tmux send-keys -t "$SESSION:AI-Brain" "ollama run bosatek-sentinel" C-m
@@ -269,27 +239,19 @@ launch_tmux() {
     tmux select-pane -t "$SESSION:AI-Brain.0"
 
     # ----------------------------------------------------------
-    # TAB 3: Network
-    #   Left        : OpenVPN (skipped in VOLATILE mode)
-    #   Top-Right   : wait_for_vpn status watcher
-    #   Bottom-Right: Burp Suite Pro — auto-create or reopen project
+    # TAB 3: Network  (PRESERVED — do not modify)
+    #   USE_VPN=1  → Left: OpenVPN | Top-Right: wait_for_vpn | Bot-Right: Burp
+    #   USE_VPN=0  → Single pane notice + Burp launch
     #
-    # Burp project file: $BURP_BASE/$ROOM_NAME/$ROOM_NAME.burp
-    # Directory is pre-created before launch_tmux is called.
+    # Burp project: $BURP_BASE/$ROOM_NAME/$ROOM_NAME.burp
+    # Directory pre-created above in new_engagement / tool_test.
     # ----------------------------------------------------------
     tmux new-window -t "$SESSION" -n "Network"
 
-    if [[ "$VOLATILE" -eq 1 ]]; then
-        # Tool Test: skip VPN, launch Burp directly
+    if [[ "$USE_VPN" -eq 1 ]]; then
+        # Left pane: OpenVPN — output logged to ~/vpn.log
         tmux send-keys -t "$SESSION:Network" \
-            "echo '[TOOL TEST] VPN skipped.'; echo ''; echo \"[*] Burp project: $BURP_PROJECT\"" C-m
-        tmux split-window -h -t "$SESSION:Network"
-        tmux send-keys -t "$SESSION:Network.1" \
-            "source '$SCRIPT_DIR/sentinel.sh' 2>/dev/null; launch_burp '$ROOM_NAME' 1" C-m
-    else
-        # Left pane: OpenVPN — logs to ~/vpn.log
-        tmux send-keys -t "$SESSION:Network" \
-            "echo '[*] Starting OpenVPN — logging to ~/vpn.log'; sudo openvpn '$VPN_PATH' 2>&1 | tee '$HOME/vpn.log'" C-m
+            "echo '[*] Starting OpenVPN...'; sudo openvpn '$VPN_PATH' 2>&1 | tee '$HOME/vpn.log'" C-m
 
         # Right column
         tmux split-window -h -t "$SESSION:Network" -p 50
@@ -298,14 +260,21 @@ launch_tmux() {
         tmux send-keys -t "$SESSION:Network.1" \
             "source '$SCRIPT_DIR/modules/network.sh' && wait_for_vpn '$HOME/vpn.log' && echo '[+] Tunnel confirmed.'" C-m
 
-        # Bottom-right: Burp Pro
+        # Bottom-right: Burp Pro — auto-creates or reopens project file
         tmux split-window -v -t "$SESSION:Network.1" -p 60
         tmux send-keys -t "$SESSION:Network.2" \
-            "echo \"[*] Burp project: $BURP_PROJECT\"; echo ''; burpsuite --project-file='$BURP_PROJECT' 2>/dev/null || { echo '[!] burpsuite not found in PATH'; read -r; }" C-m
+            "echo '[*] Burp project: $BURP_PROJECT'; echo ''; burpsuite --project-file='$BURP_PROJECT' 2>/dev/null || { echo '[!] burpsuite not found in PATH.'; read -r; }" C-m
+    else
+        # VPN skipped — show notice, launch Burp directly
+        tmux send-keys -t "$SESSION:Network" \
+            "echo '[*] VPN skipped.'; echo '[*] Burp project: $BURP_PROJECT'; echo ''" C-m
+        tmux split-window -h -t "$SESSION:Network"
+        tmux send-keys -t "$SESSION:Network.1" \
+            "burpsuite --project-file='$BURP_PROJECT' 2>/dev/null || { echo '[!] burpsuite not found in PATH.'; read -r; }" C-m
     fi
 
     # ----------------------------------------------------------
-    # TAB 4: Monitor
+    # TAB 4: Monitor  (PRESERVED — do not modify)
     #   Left  : tail -F summary.log
     #   Right : touch + watch -n 1 checklist.md
     # ----------------------------------------------------------
@@ -319,7 +288,7 @@ launch_tmux() {
         "touch '$ROOM_DIR/checklist.md'; watch -n 1 cat '$ROOM_DIR/checklist.md'" C-m
 
     # ----------------------------------------------------------
-    # Always land on Tab 1, Pane 0 (Master Terminal)
+    # Land on Tab 1, Pane 0 — Master Terminal (clean Zsh, focused)
     # ----------------------------------------------------------
     tmux select-window -t "$SESSION:Control"
     tmux select-pane -t "$SESSION:Control.0"

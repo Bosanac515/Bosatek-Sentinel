@@ -3,7 +3,7 @@
 # BOSATEK SENTINEL V3 — modules/recon.sh
 # Separate functions — each tmux pane in Tab 1 runs its own phase:
 #   run_nmap  → Pane 1 (top-right)   : RustScan / Nmap
-#   run_ffuf  → Pane 2 (bottom-right): FFUF -s -mc 200,301,302
+#   run_ffuf  → Pane 2 (bottom-right): FFUF -s -ic -mc 200,301,302
 # VOLATILE mode: no output files written to disk.
 # ============================================================
 
@@ -57,9 +57,10 @@ run_nmap() {
 # run_ffuf <TARGET_IP> <ROOM_DIR> <VOLATILE 0|1>
 #
 # Flags:
-#   -s             silent — suppresses banner and progress bar entirely
-#   -mc 200,301,302  match only real hits; drops all 404/403 noise
-#   curl -I        fires on every hit to capture response headers for AI
+#   -s               silent — suppresses banner and progress bar entirely
+#   -ic              ignore wordlist comment lines (lines starting with #)
+#   -mc 200,301,302  match only real hits; all other codes dropped
+#   curl -I          fires on every hit to capture response headers for AI
 run_ffuf() {
     local TARGET_IP="$1"
     local ROOM_DIR="$2"
@@ -98,18 +99,20 @@ run_ffuf() {
 
     echo "[*] Wordlist : $WORDLIST"
     echo "[*] Target   : http://$TARGET_IP/FUZZ"
-    echo "[*] Flags    : -s (silent, no progress bar) -mc 200,301,302"
+    echo "[*] Flags    : -s -ic -mc 200,301,302"
     echo ""
 
     # Build FFUF argument array
     # -s              : silent — no banner, no progress bar, hits only
-    # -mc 200,301,302 : match only these HTTP status codes
+    # -ic             : ignore wordlist comments (skip lines starting with #)
+    # -mc 200,301,302 : match only these HTTP status codes; all else dropped
     local FFUF_ARGS=(
         -w "$WORDLIST"
         -u "http://$TARGET_IP/FUZZ"
         -e .php,.html,.txt,.bak
         -t 100
         -mc 200,301,302
+        -ic
         -s
     )
 
