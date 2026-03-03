@@ -32,7 +32,12 @@ run_nmap() {
 
     if command -v rustscan &>/dev/null; then
         echo "[*] RustScan → Nmap -A -sC"
-        rustscan -a "$TARGET_IP" --ulimit 5000 -- -A -sC -oN "$NMAP_OUT"
+        echo "[*] Flags    : --timeout 3000 --batch-size 500 (reliable on slow Wi-Fi)"
+        rustscan -a "$TARGET_IP" \
+            --ulimit 5000 \
+            --timeout 3000 \
+            --batch-size 500 \
+            -- -A -sC -oN "$NMAP_OUT"
     else
         echo "[!] RustScan not found — falling back to Nmap."
         nmap -A -sC -sV -oN "$NMAP_OUT" "$TARGET_IP"
