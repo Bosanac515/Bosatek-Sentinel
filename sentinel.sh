@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
 # BOSATEK SENTINEL V2
-# Main launcher with Master Menu and Tmux workspace setup
+# Main launcher — Master Menu + Tmux workspace
 # ============================================================
 
 # --- CONFIGURATION ---
@@ -32,7 +32,7 @@ master_menu() {
     echo -e "${RESET}"
     echo -e "  ${GREEN}[1]${RESET} New Engagement"
     echo -e "  ${GREEN}[2]${RESET} Resume Session"
-    echo -e "  ${YELLOW}[3]${RESET} Tool Test (Volatile)"
+    echo -e "  ${YELLOW}[3]${RESET} Tool Test  (Volatile — no VPN, no saved output)"
     echo -e "  ${RED}[4]${RESET} Save & Exit"
     echo ""
     read -p "  Select option [1-4]: " CHOICE
@@ -61,7 +61,6 @@ new_engagement() {
 
     ROOM_DIR="$WRITEUP_BASE/$ROOM_NAME"
     mkdir -p "$ROOM_DIR/nmap" "$ROOM_DIR/ffuf" "$ROOM_DIR/logs"
-    cd "$ROOM_DIR" || exit 1
 
     echo -e "${GREEN}[*] Launching workspace for: $ROOM_NAME ($TARGET_IP)${RESET}"
     launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 0
@@ -88,23 +87,24 @@ resume_session() {
         sleep 2; master_menu; return
     fi
 
-    cd "$ROOM_DIR" || exit 1
     launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 0
 }
 
 # ============================================================
-# OPTION 3: TOOL TEST (VOLATILE — no output saved)
+# OPTION 3: TOOL TEST — Volatile, no VPN, stays on Control tab
 # ============================================================
 tool_test() {
     echo ""
-    echo -e "${YELLOW}[!] TOOL TEST MODE — all output is volatile and will NOT be saved.${RESET}"
+    echo -e "${YELLOW}[!] TOOL TEST MODE${RESET}"
+    echo -e "    • Output is volatile — nothing saved to disk"
+    echo -e "    • VPN module is skipped"
+    echo -e "    • Dashboard stays on Tab 1 (Control)"
     echo ""
     read -p "  Target IP (test): " TARGET_IP
 
-    ROOM_NAME="VOLATILE_TEST_$(date +%s)"
+    ROOM_NAME="VOLATILE_$(date +%s)"
     ROOM_DIR="/tmp/$ROOM_NAME"
     mkdir -p "$ROOM_DIR/nmap" "$ROOM_DIR/ffuf" "$ROOM_DIR/logs"
-    cd "$ROOM_DIR" || exit 1
 
     launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 1
 }
@@ -115,11 +115,10 @@ tool_test() {
 save_and_exit() {
     echo ""
     if tmux has-session -t "$SESSION" 2>/dev/null; then
-        # Capture any pending session notes before killing
         LAST_DIR=$(tmux display-message -p -t "$SESSION" '#{pane_current_path}' 2>/dev/null)
         if [[ -n "$LAST_DIR" && -d "$LAST_DIR/logs" ]]; then
             echo "Session closed: $(date)" >> "$LAST_DIR/logs/session.log"
-            echo -e "${GREEN}[*] Session log saved to: $LAST_DIR/logs/session.log${RESET}"
+            echo -e "${GREEN}[*] Session log → $LAST_DIR/logs/session.log${RESET}"
         fi
         tmux kill-session -t "$SESSION"
         echo -e "${GREEN}[*] Tmux session terminated.${RESET}"
@@ -133,6 +132,15 @@ save_and_exit() {
 # ============================================================
 # TMUX WORKSPACE LAUNCHER
 # launch_tmux <TARGET_IP> <ROOM_NAME> <ROOM_DIR> <VOLATILE 0|1>
+#
+# Tab 1 — Control  (3-pane dashboard)
+#   Pane 0  Left (full height)  : Master Terminal — interactive
+#   Pane 1  Top-Right           : RustScan / Nmap output
+#   Pane 2  Bottom-Right        : FFUF output
+#
+# Tab 2 — AI-Brain
+# Tab 3 — Network  (skipped in VOLATILE mode)
+# Tab 4 — Monitor
 # ============================================================
 launch_tmux() {
     local TARGET_IP="$1"
@@ -140,37 +148,64 @@ launch_tmux() {
     local ROOM_DIR="$3"
     local VOLATILE="$4"
 
-    # Kill any stale session
     tmux kill-session -t "$SESSION" 2>/dev/null
 
     # ----------------------------------------------------------
-    # Create session — TAB 1: Control
+    # Global tmux options (applied before any window is created)
+    # ----------------------------------------------------------
+    # Prefix: Ctrl+a
+    tmux start-server 2>/dev/null || true
+    tmux set-option -gs prefix C-a
+    tmux set-option -gs prefix2 None
+    tmux bind-key -T prefix C-a send-prefix
+
+    # Mouse + clipboard
+    tmux set-option -gs mouse on
+    tmux set-option -s set-clipboard on
+    tmux set-option -gs mode-keys vi
+    tmux bind-key -T copy-mode-vi MouseDragEnd1Pane \
+        send-keys -X copy-pipe-and-cancel "xclip -se c -i"
+
+    # ----------------------------------------------------------
+    # TAB 1: Control — 3-pane layout
+    #
+    #  ┌──────────────┬──────────────┐
+    #  │              │  Pane 1      │
+    #  │   Pane 0     │  (RustScan)  │
+    #  │   MASTER     ├──────────────┤
+    #  │   TERMINAL   │  Pane 2      │
+    #  │              │  (FFUF)      │
+    #  └──────────────┴──────────────┘
     # ----------------------------------------------------------
     tmux new-session -d -s "$SESSION" -n "Control"
 
-    # Set prefix to Ctrl+a (unbind default Ctrl+b)
-    tmux set-option -g -t "$SESSION" prefix C-a
-    tmux unbind-key -T prefix C-b 2>/dev/null || true
-    tmux bind-key -T prefix C-a send-prefix
-
-    # Enable mouse mode
-    tmux set-option -g -t "$SESSION" mouse on
-
-    # Status bar colour
+    # Status bar
     tmux set-option -g -t "$SESSION" status-bg colour235
     tmux set-option -g -t "$SESSION" status-fg colour250
     tmux set-option -g -t "$SESSION" status-left "#[fg=colour46,bold] SENTINEL V2 #[fg=colour250]| "
     tmux set-option -g -t "$SESSION" status-right "#[fg=colour220] $ROOM_NAME #[fg=colour250]| %H:%M "
 
-    # TAB 1: Control — env setup + recon split
-    tmux send-keys -t "$SESSION:Control" \
-        "export IP='$TARGET_IP'; export ROOM='$ROOM_NAME'; export ROOM_DIR='$ROOM_DIR'; export VOLATILE=$VOLATILE; clear; echo '=== BOSATEK SENTINEL V2 ==='; echo 'Target : $TARGET_IP'; echo 'Room   : $ROOM_NAME'; echo 'Dir    : $ROOM_DIR'; echo ''" C-m
+    # Pane 0 is the left master terminal — set env and show header
+    tmux send-keys -t "$SESSION:Control.0" \
+        "export IP='$TARGET_IP' ROOM='$ROOM_NAME' ROOM_DIR='$ROOM_DIR' VOLATILE=$VOLATILE WORDLIST='$WORDLIST'; clear" C-m
+    tmux send-keys -t "$SESSION:Control.0" \
+        "echo ''; echo '  ╔════════════════════════════════╗'; echo '  ║  BOSATEK SENTINEL V2           ║'; echo '  ║  Master Terminal               ║'; echo '  ╚════════════════════════════════╝'; echo ''; echo \"  Target : \$IP\"; echo \"  Room   : \$ROOM\"; echo \"  Dir    : \$ROOM_DIR\"; echo ''" C-m
 
-    # Split bottom: recon runner
-    tmux split-window -v -t "$SESSION:Control" -l 12
+    # Split right (Pane 1 = full right column)
+    tmux split-window -h -t "$SESSION:Control.0" -p 45
+
+    # Split Pane 1 vertically → Pane 1 (top-right) + Pane 2 (bottom-right)
+    tmux split-window -v -t "$SESSION:Control.1" -p 50
+
+    # Pane 1 (top-right): RustScan / Nmap
     tmux send-keys -t "$SESSION:Control.1" \
-        "source '$SCRIPT_DIR/modules/recon.sh' && run_recon '$TARGET_IP' '$ROOM_DIR' $VOLATILE" C-m
+        "source '$SCRIPT_DIR/modules/recon.sh' && run_nmap '$TARGET_IP' '$ROOM_DIR' $VOLATILE" C-m
 
+    # Pane 2 (bottom-right): FFUF
+    tmux send-keys -t "$SESSION:Control.2" \
+        "source '$SCRIPT_DIR/modules/recon.sh' && run_ffuf '$TARGET_IP' '$ROOM_DIR' $VOLATILE" C-m
+
+    # Return focus to Pane 0 (master terminal) — user can type freely
     tmux select-pane -t "$SESSION:Control.0"
 
     # ----------------------------------------------------------
@@ -178,44 +213,44 @@ launch_tmux() {
     # ----------------------------------------------------------
     tmux new-window -t "$SESSION" -n "AI-Brain"
     tmux send-keys -t "$SESSION:AI-Brain" "ollama run bosatek-sentinel" C-m
-
-    # Bottom split: AI background loop watching summary.log
     tmux split-window -v -t "$SESSION:AI-Brain" -l 8
     tmux send-keys -t "$SESSION:AI-Brain.1" \
         "source '$SCRIPT_DIR/modules/ai_brain.sh' && ai_brain_loop '$ROOM_DIR'" C-m
-
     tmux select-pane -t "$SESSION:AI-Brain.0"
 
     # ----------------------------------------------------------
-    # TAB 3: Network
+    # TAB 3: Network — SKIPPED in Tool Test (VOLATILE) mode
     # ----------------------------------------------------------
     tmux new-window -t "$SESSION" -n "Network"
-
-    # Left pane: VPN
-    tmux send-keys -t "$SESSION:Network" \
-        "echo '[*] Starting OpenVPN...'; sudo openvpn '$VPN_PATH' 2>&1 | tee '$HOME/vpn.log'" C-m
-
-    # Right pane: wait_for_vpn watcher + Burp placeholder
-    tmux split-window -h -t "$SESSION:Network"
-    tmux send-keys -t "$SESSION:Network.1" \
-        "source '$SCRIPT_DIR/modules/network.sh' && wait_for_vpn '$HOME/vpn.log' && echo '[+] VPN tunnel confirmed. Ready for traffic.'" C-m
+    if [[ "$VOLATILE" -eq 1 ]]; then
+        tmux send-keys -t "$SESSION:Network" \
+            "echo '[TOOL TEST] VPN module skipped in volatile mode.'" C-m
+    else
+        # Left pane: OpenVPN (logs to ~/vpn.log for wait_for_vpn to watch)
+        tmux send-keys -t "$SESSION:Network" \
+            "echo '[*] Starting OpenVPN...'; sudo openvpn '$VPN_PATH' 2>&1 | tee '$HOME/vpn.log'" C-m
+        # Right pane: wait_for_vpn watcher
+        tmux split-window -h -t "$SESSION:Network"
+        tmux send-keys -t "$SESSION:Network.1" \
+            "source '$SCRIPT_DIR/modules/network.sh' && wait_for_vpn '$HOME/vpn.log' && echo '[+] Tunnel up. Ready.'" C-m
+    fi
 
     # ----------------------------------------------------------
     # TAB 4: Monitor
+    #   Left : live tail of summary.log
+    #   Right : watch -n 1 checklist.md (touch it first if absent)
     # ----------------------------------------------------------
     tmux new-window -t "$SESSION" -n "Monitor"
 
-    # Left pane: live log tail
     tmux send-keys -t "$SESSION:Monitor" \
-        "echo '[*] Monitor live. Tailing logs...'; tail -F '$ROOM_DIR/logs/summary.log' 2>/dev/null" C-m
+        "echo '[*] Monitor — tailing summary.log'; tail -F '$ROOM_DIR/logs/summary.log' 2>/dev/null" C-m
 
-    # Right pane: checklist watcher
     tmux split-window -h -t "$SESSION:Monitor"
     tmux send-keys -t "$SESSION:Monitor.1" \
-        "watch -n 5 'cat \"$ROOM_DIR/checklist.md\" 2>/dev/null || echo \"No checklist yet...\"'" C-m
+        "touch '$ROOM_DIR/checklist.md'; watch -n 1 cat '$ROOM_DIR/checklist.md'" C-m
 
     # ----------------------------------------------------------
-    # Focus Control tab and attach
+    # Always land on Tab 1, Pane 0 (Master Terminal) after attach
     # ----------------------------------------------------------
     tmux select-window -t "$SESSION:Control"
     tmux select-pane -t "$SESSION:Control.0"

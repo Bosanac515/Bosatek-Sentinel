@@ -1,103 +1,147 @@
 #!/bin/bash
 # ============================================================
 # BOSATEK SENTINEL V2 — modules/recon.sh
-# Recon runner: RustScan/Nmap + FFUF with curl -I on hits
-# VOLATILE mode: no output files written to disk
+# Separate functions so each tmux pane runs its own phase:
+#   run_nmap  → called by Pane 1 (top-right)
+#   run_ffuf  → called by Pane 2 (bottom-right)
+# VOLATILE mode: no output files written to disk.
 # ============================================================
 
-# run_recon <TARGET_IP> <ROOM_DIR> <VOLATILE 0|1>
-run_recon() {
+# run_nmap <TARGET_IP> <ROOM_DIR> <VOLATILE 0|1>
+run_nmap() {
     local TARGET_IP="$1"
     local ROOM_DIR="$2"
     local VOLATILE="${3:-0}"
-
-    local WORDLIST="${WORDLIST:-$HOME/Desktop/wordlists/dirb/common.txt}"
-    local NMAP_OUT FFUF_OUT SUMMARY_LOG
+    local NMAP_OUT SUMMARY_LOG
 
     if [[ "$VOLATILE" -eq 1 ]]; then
         NMAP_OUT="/dev/null"
-        FFUF_OUT="/dev/null"
         SUMMARY_LOG="/dev/null"
-        echo "[!] VOLATILE MODE — no output will be written to disk."
+        echo "[!] VOLATILE — nmap output discarded."
     else
         NMAP_OUT="$ROOM_DIR/nmap/initial.txt"
-        FFUF_OUT="$ROOM_DIR/ffuf/hits.json"
         SUMMARY_LOG="$ROOM_DIR/logs/summary.log"
-        mkdir -p "$ROOM_DIR/nmap" "$ROOM_DIR/ffuf" "$ROOM_DIR/logs"
+        mkdir -p "$ROOM_DIR/nmap" "$ROOM_DIR/logs"
     fi
 
-    echo ""
     echo "============================================"
-    echo " RECON START: $TARGET_IP"
+    echo " PORT SCAN — $TARGET_IP"
     echo " $(date)"
     echo "============================================"
-
-    # ----------------------------------------------------------
-    # PHASE 1: Port scan (RustScan → Nmap, fallback to Nmap only)
-    # ----------------------------------------------------------
     echo ""
-    echo "[*] Phase 1 — Port Scan"
 
     if command -v rustscan &>/dev/null; then
-        echo "[*] Running RustScan..."
-        rustscan -a "$TARGET_IP" --ulimit 5000 -- -A -sC -oN "$NMAP_OUT" 2>&1 | tee_or_discard "$VOLATILE"
+        echo "[*] RustScan → Nmap -A -sC"
+        rustscan -a "$TARGET_IP" --ulimit 5000 -- -A -sC -oN "$NMAP_OUT"
     else
-        echo "[!] RustScan not found, falling back to Nmap."
-        nmap -A -sC -sV -oN "$NMAP_OUT" "$TARGET_IP" 2>&1 | tee_or_discard "$VOLATILE"
+        echo "[!] RustScan not found — using Nmap directly."
+        nmap -A -sC -sV -oN "$NMAP_OUT" "$TARGET_IP"
     fi
 
     if [[ "$VOLATILE" -eq 0 && -f "$NMAP_OUT" ]]; then
-        echo "" >> "$SUMMARY_LOG"
-        echo "=== NMAP $(date) ===" >> "$SUMMARY_LOG"
-        cat "$NMAP_OUT" >> "$SUMMARY_LOG"
-        echo "[+] Nmap output appended to summary.log"
+        {
+            echo ""
+            echo "=== NMAP $(date) ==="
+            cat "$NMAP_OUT"
+        } >> "$SUMMARY_LOG"
+        echo ""
+        echo "[+] Nmap results saved → $NMAP_OUT"
+        echo "[+] Summary log updated → $SUMMARY_LOG"
     fi
 
-    # ----------------------------------------------------------
-    # PHASE 2: Web discovery with FFUF (quiet mode)
-    # ----------------------------------------------------------
     echo ""
-    echo "[*] Phase 2 — Web Directory Fuzzing (FFUF)"
+    echo "[*] Port scan complete. Press Enter to reuse this pane."
+    read -r
+}
+
+# run_ffuf <TARGET_IP> <ROOM_DIR> <VOLATILE 0|1>
+run_ffuf() {
+    local TARGET_IP="$1"
+    local ROOM_DIR="$2"
+    local VOLATILE="${3:-0}"
+    local WORDLIST="${WORDLIST:-$HOME/Desktop/wordlists/dirb/common.txt}"
+    local FFUF_OUT SUMMARY_LOG
+
+    if [[ "$VOLATILE" -eq 1 ]]; then
+        FFUF_OUT=""
+        SUMMARY_LOG="/dev/null"
+        echo "[!] VOLATILE — FFUF output discarded."
+    else
+        FFUF_OUT="$ROOM_DIR/ffuf/hits.json"
+        SUMMARY_LOG="$ROOM_DIR/logs/summary.log"
+        mkdir -p "$ROOM_DIR/ffuf" "$ROOM_DIR/logs"
+    fi
+
+    echo "============================================"
+    echo " WEB FUZZ (FFUF) — http://$TARGET_IP/"
+    echo " $(date)"
+    echo "============================================"
+    echo ""
 
     if ! command -v ffuf &>/dev/null; then
-        echo "[!] ffuf not found — skipping web fuzzing."
-        return
+        echo "[!] ffuf not installed — skipping."
+        return 1
     fi
 
     if [[ ! -f "$WORDLIST" ]]; then
-        echo "[!] Wordlist not found at: $WORDLIST — skipping FFUF."
-        return
+        echo "[!] Wordlist not found: $WORDLIST"
+        echo "[!] Set WORDLIST env var or install SecLists."
+        return 1
     fi
 
-    local FFUF_CMD_ARGS=(-w "$WORDLIST" -u "http://$TARGET_IP/FUZZ"
-                         -e .php,.html,.txt,.bak
-                         -t 100
-                         -fs 0
-                         -mc 200,204,301,302,307,401,403
-                         -s)   # -s = silent/quiet output (only hits)
-
-    if [[ "$VOLATILE" -eq 0 ]]; then
-        FFUF_CMD_ARGS+=(-o "$FFUF_OUT" -of json)
-    fi
-
-    echo "[*] FFUF running quietly — hits will be probed with curl -I ..."
+    echo "[*] Wordlist : $WORDLIST"
+    echo "[*] Target   : http://$TARGET_IP/FUZZ"
+    echo "[*] Filters  : status 200,301,302 | silent (no progress bar)"
     echo ""
 
-    # Run FFUF; capture hits from quiet output (one URL per line)
-    ffuf "${FFUF_CMD_ARGS[@]}" 2>&1 | while IFS= read -r line; do
-        # FFUF -s prints matched paths, not full URLs; reconstruct
+    # -s  = silent: suppresses progress bar and banner entirely
+    # -mc = match only these status codes (no noise from 404s etc.)
+    local FFUF_ARGS=(-w "$WORDLIST"
+                     -u "http://$TARGET_IP/FUZZ"
+                     -e .php,.html,.txt,.bak
+                     -t 100
+                     -mc 200,301,302
+                     -s)
+
+    if [[ "$VOLATILE" -eq 0 ]]; then
+        FFUF_ARGS+=(-o "$FFUF_OUT" -of json)
+    fi
+
+    # Run FFUF; each line is a matched path (with -s, format: "path")
+    # Pipe through our hit-handler to fire curl -I on each result
+    ffuf "${FFUF_ARGS[@]}" 2>/dev/null | _handle_ffuf_hits "$TARGET_IP" "$SUMMARY_LOG" "$VOLATILE"
+
+    echo ""
+    echo "[+] FFUF complete."
+    [[ "$VOLATILE" -eq 0 ]] && echo "[+] Hits saved → $FFUF_OUT"
+    echo ""
+    echo "[*] Press Enter to reuse this pane."
+    read -r
+}
+
+# _handle_ffuf_hits <TARGET_IP> <SUMMARY_LOG> <VOLATILE>
+# Reads ffuf silent output line-by-line; fires curl -I on each hit.
+_handle_ffuf_hits() {
+    local TARGET_IP="$1"
+    local SUMMARY_LOG="$2"
+    local VOLATILE="${3:-0}"
+
+    while IFS= read -r line; do
+        # With -s, ffuf prints one result per line.
+        # Extract the path (first whitespace-delimited token).
         local HIT_PATH
         HIT_PATH=$(echo "$line" | awk '{print $1}')
         [[ -z "$HIT_PATH" ]] && continue
 
-        local FULL_URL="http://$TARGET_IP/$HIT_PATH"
+        local FULL_URL="http://$TARGET_IP/${HIT_PATH#/}"
         echo "[HIT] $FULL_URL"
 
-        # Probe each hit with curl -I to get headers for AI analysis
         local HEADERS
         HEADERS=$(curl -sI --max-time 5 "$FULL_URL" 2>/dev/null)
         if [[ -n "$HEADERS" ]]; then
-            echo "  >> $(echo "$HEADERS" | head -1)"
+            local STATUS_LINE
+            STATUS_LINE=$(echo "$HEADERS" | head -1 | tr -d '\r')
+            echo "  └─ $STATUS_LINE"
 
             if [[ "$VOLATILE" -eq 0 ]]; then
                 {
@@ -108,21 +152,4 @@ run_recon() {
             fi
         fi
     done
-
-    echo ""
-    echo "[+] FFUF phase complete."
-
-    if [[ "$VOLATILE" -eq 0 ]]; then
-        echo "[+] Summary log updated: $SUMMARY_LOG"
-    fi
-}
-
-# Helper: pipe output to screen only when volatile, or tee to file
-tee_or_discard() {
-    local VOLATILE="$1"
-    if [[ "$VOLATILE" -eq 1 ]]; then
-        cat   # just pass through to stdout, no file
-    else
-        cat   # caller already set NMAP_OUT to a real path via -oN
-    fi
 }
