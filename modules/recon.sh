@@ -1,9 +1,9 @@
 #!/bin/bash
 # ============================================================
-# BOSATEK SENTINEL V2 — modules/recon.sh
-# Separate functions so each tmux pane runs its own phase:
-#   run_nmap  → called by Pane 1 (top-right)
-#   run_ffuf  → called by Pane 2 (bottom-right)
+# BOSATEK SENTINEL V3 — modules/recon.sh
+# Separate functions — each tmux pane in Tab 1 runs its own phase:
+#   run_nmap  → Pane 1 (top-right)   : RustScan / Nmap
+#   run_ffuf  → Pane 2 (bottom-right): FFUF -s -mc 200,301,302
 # VOLATILE mode: no output files written to disk.
 # ============================================================
 
@@ -34,7 +34,7 @@ run_nmap() {
         echo "[*] RustScan → Nmap -A -sC"
         rustscan -a "$TARGET_IP" --ulimit 5000 -- -A -sC -oN "$NMAP_OUT"
     else
-        echo "[!] RustScan not found — using Nmap directly."
+        echo "[!] RustScan not found — falling back to Nmap."
         nmap -A -sC -sV -oN "$NMAP_OUT" "$TARGET_IP"
     fi
 
@@ -45,8 +45,8 @@ run_nmap() {
             cat "$NMAP_OUT"
         } >> "$SUMMARY_LOG"
         echo ""
-        echo "[+] Nmap results saved → $NMAP_OUT"
-        echo "[+] Summary log updated → $SUMMARY_LOG"
+        echo "[+] Saved  → $NMAP_OUT"
+        echo "[+] Logged → $SUMMARY_LOG"
     fi
 
     echo ""
@@ -55,6 +55,11 @@ run_nmap() {
 }
 
 # run_ffuf <TARGET_IP> <ROOM_DIR> <VOLATILE 0|1>
+#
+# Flags:
+#   -s             silent — suppresses banner and progress bar entirely
+#   -mc 200,301,302  match only real hits; drops all 404/403 noise
+#   curl -I        fires on every hit to capture response headers for AI
 run_ffuf() {
     local TARGET_IP="$1"
     local ROOM_DIR="$2"
@@ -80,55 +85,60 @@ run_ffuf() {
 
     if ! command -v ffuf &>/dev/null; then
         echo "[!] ffuf not installed — skipping."
-        return 1
+        echo "[*] Press Enter to reuse this pane."
+        read -r; return 1
     fi
 
     if [[ ! -f "$WORDLIST" ]]; then
         echo "[!] Wordlist not found: $WORDLIST"
         echo "[!] Set WORDLIST env var or install SecLists."
-        return 1
+        echo "[*] Press Enter to reuse this pane."
+        read -r; return 1
     fi
 
     echo "[*] Wordlist : $WORDLIST"
     echo "[*] Target   : http://$TARGET_IP/FUZZ"
-    echo "[*] Filters  : status 200,301,302 | silent (no progress bar)"
+    echo "[*] Flags    : -s (silent, no progress bar) -mc 200,301,302"
     echo ""
 
-    # -s  = silent: suppresses progress bar and banner entirely
-    # -mc = match only these status codes (no noise from 404s etc.)
-    local FFUF_ARGS=(-w "$WORDLIST"
-                     -u "http://$TARGET_IP/FUZZ"
-                     -e .php,.html,.txt,.bak
-                     -t 100
-                     -mc 200,301,302
-                     -s)
+    # Build FFUF argument array
+    # -s              : silent — no banner, no progress bar, hits only
+    # -mc 200,301,302 : match only these HTTP status codes
+    local FFUF_ARGS=(
+        -w "$WORDLIST"
+        -u "http://$TARGET_IP/FUZZ"
+        -e .php,.html,.txt,.bak
+        -t 100
+        -mc 200,301,302
+        -s
+    )
 
     if [[ "$VOLATILE" -eq 0 ]]; then
         FFUF_ARGS+=(-o "$FFUF_OUT" -of json)
     fi
 
-    # Run FFUF; each line is a matched path (with -s, format: "path")
-    # Pipe through our hit-handler to fire curl -I on each result
+    # Pipe FFUF hits through the handler (fires curl -I on each match)
     ffuf "${FFUF_ARGS[@]}" 2>/dev/null | _handle_ffuf_hits "$TARGET_IP" "$SUMMARY_LOG" "$VOLATILE"
 
     echo ""
     echo "[+] FFUF complete."
-    [[ "$VOLATILE" -eq 0 ]] && echo "[+] Hits saved → $FFUF_OUT"
+    [[ "$VOLATILE" -eq 0 ]] && echo "[+] JSON hits → $FFUF_OUT"
     echo ""
     echo "[*] Press Enter to reuse this pane."
     read -r
 }
 
 # _handle_ffuf_hits <TARGET_IP> <SUMMARY_LOG> <VOLATILE>
-# Reads ffuf silent output line-by-line; fires curl -I on each hit.
+# Reads ffuf -s output line-by-line; fires curl -I on each match
+# and appends headers to summary.log for the AI-Brain loop to pick up.
 _handle_ffuf_hits() {
     local TARGET_IP="$1"
     local SUMMARY_LOG="$2"
     local VOLATILE="${3:-0}"
 
     while IFS= read -r line; do
-        # With -s, ffuf prints one result per line.
-        # Extract the path (first whitespace-delimited token).
+        # ffuf -s output format: "path [Status: 200, Size: ...]"
+        # Extract first token (the path).
         local HIT_PATH
         HIT_PATH=$(echo "$line" | awk '{print $1}')
         [[ -z "$HIT_PATH" ]] && continue

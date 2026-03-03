@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# BOSATEK SENTINEL V2 — modules/network.sh
+# BOSATEK SENTINEL V3 — modules/network.sh
 # Network helpers: VPN wait, interface checks
 # ============================================================
 
@@ -28,16 +28,17 @@ wait_for_vpn() {
         fi
     done
 
-    # Tail the log and watch for the success marker
+    # Poll the log for success or known failure markers
     while true; do
         if grep -q "Initialization Sequence Completed" "$LOG_FILE" 2>/dev/null; then
+            echo ""
             echo "[+] VPN connected — Initialization Sequence Completed."
             _print_vpn_interface
             return 0
         fi
 
-        # Check for common failure conditions
         if grep -qiE "AUTH_FAILED|TLS Error|Connection refused|SIGTERM" "$LOG_FILE" 2>/dev/null; then
+            echo ""
             echo "[!] VPN connection failed. Check $LOG_FILE for details."
             return 2
         fi
@@ -46,7 +47,8 @@ wait_for_vpn() {
         ELAPSED=$((ELAPSED + POLL_INTERVAL))
 
         if [[ "$ELAPSED" -ge "$TIMEOUT" ]]; then
-            echo "[!] Timeout (${TIMEOUT}s) waiting for VPN — tunnel may not be up."
+            echo ""
+            echo "[!] Timeout (${TIMEOUT}s) — tunnel may not be up."
             return 1
         fi
 
@@ -65,7 +67,7 @@ _print_vpn_interface() {
     fi
 }
 
-# check_vpn_status — quick status check, non-blocking
+# check_vpn_status — quick non-blocking status check
 check_vpn_status() {
     if ip link show tun0 &>/dev/null; then
         local TUN_IP
