@@ -1,15 +1,14 @@
 #!/bin/bash
 # ============================================================
-# BOSATEK SENTINEL V3.1 — MASTER CONTROL
-# Stability reset — clean multi-tab layout
+# BOSATEK SENTINEL V3 — MVP MODE
+# LinkedIn demo build — clean, stable, no AI Brain
 # ============================================================
 
 # --- CONFIGURATION ---
 VPN_PATH="$HOME/Documents/THM.ovpn"
-WRITEUP_BASE="$HOME/Documents/GitHub/Bosanac-Writeups/TryHackMe"
-BURP_BASE="$HOME/Documents/GitHub/Bosanac-Writeups"
-BURP_EXE="/opt/BurpSuitePro/BurpSuitePro"
+ENGAGEMENTS_BASE="$HOME/Documents/GitHub/Bosanac-Writeups"
 WORDLIST="$HOME/Desktop/wordlists/dirb/common.txt"
+BURP_EXE="/opt/BurpSuitePro/BurpSuitePro"
 SESSION="sentinel"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -28,14 +27,13 @@ master_menu() {
     clear
     echo -e "${GOLD}${BOLD}"
     echo "  ╔══════════════════════════════════════════════╗"
-    echo "  ║   BOSATEK SENTINEL V3.1 — MASTER CONTROL    ║"
-    echo "  ║   Tactical Recon Framework                   ║"
+    echo "  ║    BOSATEK SENTINEL V3 - MVP MODE            ║"
     echo "  ╚══════════════════════════════════════════════╝"
     echo -e "${RESET}"
-    echo -e "  ${GREEN}[1]${RESET} New Engagement"
-    echo -e "  ${GREEN}[2]${RESET} Resume Session"
-    echo -e "  ${YELLOW}[3]${RESET} Tool Test  (Volatile — date-stamped)"
-    echo -e "  ${RED}[4]${RESET} Save & Exit"
+    echo -e "  ${GREEN}[1]${RESET} New Engagement  (+ VPN)"
+    echo -e "  ${GREEN}[2]${RESET} Resume Session  (+ VPN)"
+    echo -e "  ${YELLOW}[3]${RESET} Tool Test       (No VPN)"
+    echo -e "  ${RED}[4]${RESET} Quit"
     echo ""
     read -p "  Select option [1-4]: " CHOICE
 
@@ -43,121 +41,113 @@ master_menu() {
         1) new_engagement ;;
         2) resume_session ;;
         3) tool_test ;;
-        4) save_and_exit ;;
-        *) echo -e "${RED}[!] Invalid option.${RESET}"; sleep 1; master_menu ;;
+        4) echo ""; echo "Goodbye."; exit 0 ;;
+        *) echo -e "${RED}Invalid option.${RESET}"; sleep 1; master_menu ;;
     esac
 }
 
 # ============================================================
-# OPTION 1: NEW ENGAGEMENT
+# OPTION 1: NEW ENGAGEMENT — asks Room Name, starts VPN
 # ============================================================
 new_engagement() {
     echo ""
-    read -p "  Target IP   : " TARGET_IP
-    read -p "  Room Name   : " ROOM_NAME
+    read -p "  Target IP  : " TARGET_IP
+    read -p "  Room Name  : " ROOM_NAME
 
     if [[ -z "$TARGET_IP" || -z "$ROOM_NAME" ]]; then
         echo -e "${RED}[!] Target IP and Room Name are required.${RESET}"
         sleep 1; master_menu; return
     fi
 
-    ROOM_DIR="$WRITEUP_BASE/$ROOM_NAME"
-    mkdir -p "$ROOM_DIR/nmap" "$ROOM_DIR/ffuf" "$ROOM_DIR/logs"
-    mkdir -p "$BURP_BASE/$ROOM_NAME"
+    ROOM_DIR="$ENGAGEMENTS_BASE/$ROOM_NAME"
+    mkdir -p "$ROOM_DIR/nmap" "$ROOM_DIR/ffuf"
 
-    echo -e "${GOLD}[*] Launching workspace: $ROOM_NAME ($TARGET_IP)${RESET}"
-    launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 0 0
+    _start_vpn
+    launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 0
 }
 
 # ============================================================
-# OPTION 2: RESUME SESSION
+# OPTION 2: RESUME SESSION — asks Room Name, starts VPN
 # ============================================================
 resume_session() {
     if tmux has-session -t "$SESSION" 2>/dev/null; then
-        echo -e "${GREEN}[*] Reattaching to existing session...${RESET}"
+        echo -e "${GREEN}[*] Reattaching to session...${RESET}"
         tmux attach-session -t "$SESSION"
         return
     fi
 
-    echo -e "${YELLOW}[!] No live session found. Provide details to relaunch.${RESET}"
+    echo -e "${YELLOW}[!] No live session. Provide details to relaunch.${RESET}"
     echo ""
-    read -p "  Target IP   : " TARGET_IP
-    read -p "  Room Name   : " ROOM_NAME
+    read -p "  Target IP  : " TARGET_IP
+    read -p "  Room Name  : " ROOM_NAME
 
-    ROOM_DIR="$WRITEUP_BASE/$ROOM_NAME"
+    ROOM_DIR="$ENGAGEMENTS_BASE/$ROOM_NAME"
     if [[ ! -d "$ROOM_DIR" ]]; then
-        echo -e "${RED}[!] Room directory not found: $ROOM_DIR${RESET}"
+        echo -e "${RED}[!] Not found: $ROOM_DIR${RESET}"
         sleep 2; master_menu; return
     fi
 
-    mkdir -p "$BURP_BASE/$ROOM_NAME"
-    launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 0 0
+    _start_vpn
+    launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 0
 }
 
 # ============================================================
-# OPTION 3: TOOL TEST — Volatile, date-stamped, VPN optional
+# OPTION 3: TOOL TEST — No VPN, date-stamped, volatile output
 # ============================================================
 tool_test() {
     echo ""
-    echo -e "${YELLOW}[!] TOOL TEST MODE — nothing saved permanently.${RESET}"
+    echo -e "${YELLOW}[!] TOOL TEST — No VPN. Output is volatile (/tmp).${RESET}"
     echo ""
     read -p "  Target IP (test): " TARGET_IP
 
     ROOM_NAME="TEST_$(date +%Y%m%d_%H%M)"
     ROOM_DIR="/tmp/$ROOM_NAME"
-    mkdir -p "$ROOM_DIR/nmap" "$ROOM_DIR/ffuf" "$ROOM_DIR/logs"
-    mkdir -p "$BURP_BASE/$ROOM_NAME"
+    mkdir -p "$ROOM_DIR/nmap" "$ROOM_DIR/ffuf"
 
-    echo ""
-    read -p "  Connect VPN? (y/n): " VPN_CHOICE
-    local USE_VPN=0
-    [[ "$VPN_CHOICE" =~ ^[Yy]$ ]] && USE_VPN=1
+    echo -e "${YELLOW}[*] Room: $ROOM_NAME | Dir: $ROOM_DIR${RESET}"
+    sleep 1
 
-    launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 1 "$USE_VPN"
+    launch_tmux "$TARGET_IP" "$ROOM_NAME" "$ROOM_DIR" 1
 }
 
 # ============================================================
-# OPTION 4: SAVE & EXIT
+# INTERNAL: start VPN in the background before launching tmux.
+# OpenVPN output logs to ~/vpn.log — does not block the terminal.
+# Requires passwordless sudo for openvpn OR user enters password here.
 # ============================================================
-save_and_exit() {
+_start_vpn() {
     echo ""
-    if tmux has-session -t "$SESSION" 2>/dev/null; then
-        LAST_DIR=$(tmux display-message -p -t "$SESSION" '#{pane_current_path}' 2>/dev/null)
-        if [[ -n "$LAST_DIR" && -d "$LAST_DIR/logs" ]]; then
-            echo "Session closed: $(date)" >> "$LAST_DIR/logs/session.log"
-        fi
-        tmux kill-session -t "$SESSION"
-        echo -e "${GREEN}[*] Session terminated.${RESET}"
-    else
-        echo -e "${YELLOW}[*] No active session.${RESET}"
-    fi
-    echo -e "${GOLD}[*] Bosatek Sentinel V3.1 — goodbye.${RESET}"
-    exit 0
+    echo -e "${GOLD}[*] Starting VPN → ${VPN_PATH}${RESET}"
+    echo -e "    Log: ~/vpn.log"
+    sudo openvpn "$VPN_PATH" > "$HOME/vpn.log" 2>&1 &
+    echo -e "${GREEN}[*] VPN PID $! — connecting in background.${RESET}"
+    echo -e "    Watch progress: tail -f ~/vpn.log"
+    sleep 2
+    echo ""
 }
 
 # ============================================================
 # TMUX WORKSPACE LAUNCHER
-# launch_tmux <TARGET_IP> <ROOM_NAME> <ROOM_DIR> <VOLATILE 0|1> <USE_VPN 0|1>
+# launch_tmux <TARGET_IP> <ROOM_NAME> <ROOM_DIR> <VOLATILE 0|1>
 #
 # ┌──────────────────────────────────────────────────────────┐
 # │  Tab 1 [Recon]                                           │
-# │  ┌─────────────────────────────────────────────────┐    │
-# │  │  Pane 0 (top ~60%)  :  RustScan / Nmap          │    │
-# │  ├─────────────────────────────────────────────────┤    │
-# │  │  Pane 1 (bottom 40%):  FFUF  -s -ic -mc 200..   │    │
-# │  └─────────────────────────────────────────────────┘    │
+# │  ┌───────────────────────────────────────────────────┐   │
+# │  │  Pane 0 (top 60%)  — RustScan / Nmap              │   │
+# │  ├───────────────────────────────────────────────────┤   │
+# │  │  Pane 1 (bot 40%)  — FFUF -s -mc 200,301,302,403  │   │
+# │  └───────────────────────────────────────────────────┘   │
 # │                                                          │
-# │  Tab 2 [Workspace]                                       │
-# │  ┌──────────────────────┬──────────────────────────┐    │
-# │  │  Pane 0 (left 45%)   │  Pane 1 (right 55%)      │    │
-# │  │  AI Brain watcher    │  MASTER TERMINAL          │    │
-# │  │  tail -F summary.log │  Clean Zsh — type freely  │    │
-# │  └──────────────────────┴──────────────────────────┘    │
+# │  Tab 2 [Master]                                          │
+# │  ┌───────────────────────────────────────────────────┐   │
+# │  │  Full-screen interactive Zsh — type freely         │   │
+# │  │  'sentinel-save' → saves notes & exits             │   │
+# │  └───────────────────────────────────────────────────┘   │
 # │                                                          │
 # │  Tab 3 [Writeup]                                         │
-# │  ┌─────────────────────────────────────────────────┐    │
-# │  │  nano checklist.md (or writeup.md)               │    │
-# │  └─────────────────────────────────────────────────┘    │
+# │  ┌───────────────────────────────────────────────────┐   │
+# │  │  nano writeup.md                                   │   │
+# │  └───────────────────────────────────────────────────┘   │
 # └──────────────────────────────────────────────────────────┘
 # ============================================================
 launch_tmux() {
@@ -165,111 +155,173 @@ launch_tmux() {
     local ROOM_NAME="$2"
     local ROOM_DIR="$3"
     local VOLATILE="$4"
-    local USE_VPN="$5"
-    local BURP_PROJECT="$BURP_BASE/$ROOM_NAME/$ROOM_NAME.burp"
+    local WRITEUP_FILE="$ENGAGEMENTS_BASE/$ROOM_NAME/writeup.md"
+    local NMAP_OUT="$ROOM_DIR/nmap/initial.txt"
+    local FFUF_OUT="$ROOM_DIR/ffuf/hits.csv"
 
     tmux kill-session -t "$SESSION" 2>/dev/null
     tmux start-server 2>/dev/null || true
 
     # ----------------------------------------------------------
-    # TMUX OPTIONS — bare essentials only, no custom mouse hooks
+    # TMUX OPTIONS — bare essentials, zero custom mouse bindings
     # ----------------------------------------------------------
-
-    # Prefix: Ctrl+a
-    # bind C-a send-prefix → double-tap C-a sends literal C-a to the app
+    # Prefix: Ctrl+a — double-tap sends literal C-a to the app
     tmux set -g prefix C-a
     tmux unbind C-b
     tmux bind C-a send-prefix
 
-    # Mouse: on, zero custom bindings
-    # Unbind tmux's default right-click pane menu so the terminal
-    # emulator receives the click and shows the native Kali context menu
+    # Mouse: ON — no custom drag or right-click bindings whatsoever
     tmux set -g mouse on
-    tmux unbind-key -T root MouseDown3Pane
 
-    # Status bar — gold theme
-    tmux set -g status-style          "bg=colour235,fg=colour220"
-    tmux set -g status-left           "#[fg=colour220,bold] V3.1 #[fg=colour250]| "
-    tmux set -g status-right          "#[fg=colour220,bold] $ROOM_NAME #[fg=colour250]| %H:%M "
+    # Status bar
+    tmux set -g status-style          "bg=colour235,fg=colour250"
+    tmux set -g status-left           "#[fg=colour220,bold] SENTINEL V3 #[fg=colour250]| "
+    tmux set -g status-right          "#[fg=colour220] $ROOM_NAME #[fg=colour250]| %H:%M "
     tmux set -g window-status-current-style "fg=colour220,bold"
 
     # ----------------------------------------------------------
+    # Write the sentinel-save function to a file so the Master
+    # Terminal can source it. Variables are expanded NOW (write time):
+    #   $WRITEUP_FILE, $NMAP_OUT, $FFUF_OUT, $SESSION are injected.
+    # The \$(...) and \$VAR inside the function stay literal.
+    # ----------------------------------------------------------
+    mkdir -p "$(dirname "$WRITEUP_FILE")"
+    cat > "$ROOM_DIR/.sentinel_env.sh" << FUNCEOF
+# Bosatek Sentinel V3 — session environment
+# Source this file to get the sentinel-save command.
+
+sentinel-save() {
+    local WU="$WRITEUP_FILE"
+    local NMAP="$NMAP_OUT"
+    local FFUF="$FFUF_OUT"
+
+    echo ""
+    echo "[sentinel-save] Saving session..."
+
+    mkdir -p "\$(dirname "\$WU")"
+
+    # Header
+    echo ""                              >> "\$WU"
+    echo "---"                           >> "\$WU"
+    echo "## Session Saved: \$(date)"   >> "\$WU"
+    echo ""                              >> "\$WU"
+
+    # Port scan output
+    if [[ -f "\$NMAP" ]]; then
+        echo "### Port Scan — last 100 lines" >> "\$WU"
+        echo ""                               >> "\$WU"
+        tail -100 "\$NMAP"                   >> "\$WU"
+        echo ""                               >> "\$WU"
+    else
+        echo "### Port Scan — no output file found" >> "\$WU"
+        echo ""                                     >> "\$WU"
+    fi
+
+    # FFUF hits
+    if [[ -f "\$FFUF" ]]; then
+        echo "### FFUF Hits — last 100 lines" >> "\$WU"
+        echo ""                               >> "\$WU"
+        tail -100 "\$FFUF"                   >> "\$WU"
+        echo ""                               >> "\$WU"
+    else
+        echo "### FFUF — no hits file found" >> "\$WU"
+        echo ""                              >> "\$WU"
+    fi
+
+    echo "Session Ended: \$(date)" >> "\$WU"
+    echo ""
+    echo "[sentinel-save] Written to: \$WU"
+    sleep 1
+    tmux kill-session -t $SESSION 2>/dev/null
+}
+
+export -f sentinel-save
+FUNCEOF
+
+    # ----------------------------------------------------------
+    # Initialise writeup.md with a header if it is brand new
+    # ----------------------------------------------------------
+    if [[ ! -s "$WRITEUP_FILE" ]]; then
+        cat > "$WRITEUP_FILE" << MDEOF
+# $ROOM_NAME
+
+**Target:** $TARGET_IP
+**Date:** $(date)
+
+---
+
+## Notes
+
+MDEOF
+    fi
+
+    # ----------------------------------------------------------
     # TAB 1 [Recon] — horizontal (top/bottom) split
-    #   Pane 0 (top  ~60%) : RustScan / Nmap
-    #   Pane 1 (bottom 40%): FFUF  -s -ic -mc 200,301,302
+    #   Pane 0 (top 60%) : RustScan / Nmap
+    #   Pane 1 (bot 40%) : FFUF  -s -mc 200,301,302,403
     # ----------------------------------------------------------
     tmux new-session -d -s "$SESSION" -n "Recon"
 
-    # Pane 0: export env + start RustScan
-    tmux send-keys -t "$SESSION:Recon.0" \
-        "export IP='$TARGET_IP' ROOM='$ROOM_NAME' ROOM_DIR='$ROOM_DIR' VOLATILE=$VOLATILE WORDLIST='$WORDLIST'" C-m
-    tmux send-keys -t "$SESSION:Recon.0" \
-        "source '$SCRIPT_DIR/modules/recon.sh' && run_nmap '$TARGET_IP' '$ROOM_DIR' $VOLATILE" C-m
+    # Common env export helper (sent to both panes)
+    local ENV_EXPORT="export TARGET='$TARGET_IP' IP='$TARGET_IP' ROOM='$ROOM_NAME' ROOM_DIR='$ROOM_DIR' WORDLIST='$WORDLIST'"
 
-    # Split horizontally (top/bottom): -v flag, keep bottom at 40%
-    tmux split-window -v -t "$SESSION:Recon.0" -p 40
-
-    # Pane 1: export env + start FFUF
-    tmux send-keys -t "$SESSION:Recon.1" \
-        "export IP='$TARGET_IP' ROOM='$ROOM_NAME' ROOM_DIR='$ROOM_DIR' VOLATILE=$VOLATILE WORDLIST='$WORDLIST'" C-m
-    tmux send-keys -t "$SESSION:Recon.1" \
-        "source '$SCRIPT_DIR/modules/recon.sh' && run_ffuf '$TARGET_IP' '$ROOM_DIR' $VOLATILE" C-m
-
-    # ----------------------------------------------------------
-    # TAB 2 [Workspace] — vertical (left/right) split
-    #   Pane 0 (left  45%): AI Brain background + tail -F summary.log
-    #   Pane 1 (right 55%): MASTER TERMINAL — clean Zsh, user types here
-    # ----------------------------------------------------------
-    tmux new-window -t "$SESSION" -n "Workspace"
-
-    # Pane 0 (left): start ai_brain_loop in background, then tail summary.log
-    # The loop writes its status to ai_brain.log — it does NOT touch the
-    # Master Terminal pane and has no access to user input.
-    tmux send-keys -t "$SESSION:Workspace.0" \
-        "source '$SCRIPT_DIR/modules/ai_brain.sh'" C-m
-    tmux send-keys -t "$SESSION:Workspace.0" \
-        "ai_brain_loop '$ROOM_DIR' >> '$ROOM_DIR/logs/ai_brain.log' 2>&1 &" C-m
-    tmux send-keys -t "$SESSION:Workspace.0" \
-        "echo '[AI-Brain] Watcher running (→ ai_brain.log)'; echo ''; touch '$ROOM_DIR/logs/summary.log'; tail -F '$ROOM_DIR/logs/summary.log'" C-m
-
-    # Split vertically (left/right): -h flag, right pane gets 55%
-    tmux split-window -h -t "$SESSION:Workspace.0" -p 55
-
-    # Pane 1 (right): Master Terminal
-    # — export env, gold banner, launch Burp in background, then CLEAN ZSH.
-    # Nothing blocks or loops here. User can type immediately.
-    tmux send-keys -t "$SESSION:Workspace.1" \
-        "export IP='$TARGET_IP' ROOM='$ROOM_NAME' ROOM_DIR='$ROOM_DIR' VOLATILE=$VOLATILE WORDLIST='$WORDLIST'; clear" C-m
-
-    tmux send-keys -t "$SESSION:Workspace.1" \
-        "printf '\033[1;33m╔══════════════════════════════════════════════╗\n║  BOSATEK SENTINEL V3.1 — MASTER TERMINAL     ║\n╚══════════════════════════════════════════════╝\033[0m\n\n  \033[0;32mTarget :\033[0m %s\n  \033[0;32mRoom   :\033[0m %s\n  \033[0;32mDir    :\033[0m %s\n\n' \"\$IP\" \"\$ROOM\" \"\$ROOM_DIR\"" C-m
-
-    # Launch Burp Pro — directory already created above.
-    # Background + disown so no job-control noise in the terminal.
-    tmux send-keys -t "$SESSION:Workspace.1" \
-        "mkdir -p '$BURP_BASE/$ROOM_NAME' && '$BURP_EXE' --project-file='$BURP_PROJECT' &>/dev/null & disown; echo '[Burp] Launching $BURP_PROJECT...'" C-m
-
-    # VPN (only if requested) — background openvpn, log to ~/vpn.log
-    if [[ "$USE_VPN" -eq 1 ]]; then
-        tmux send-keys -t "$SESSION:Workspace.1" \
-            "sudo openvpn '$VPN_PATH' > '$HOME/vpn.log' 2>&1 & echo '[VPN] OpenVPN starting → ~/vpn.log'" C-m
+    # Pane 0 — RustScan
+    tmux send-keys -t "$SESSION:Recon.0" "$ENV_EXPORT" C-m
+    if [[ "$VOLATILE" -eq 1 ]]; then
+        tmux send-keys -t "$SESSION:Recon.0" \
+            "echo '[Recon] RustScan starting...'; rustscan -a $TARGET_IP --ulimit 5000 --timeout 3000 --batch-size 500 -- -A -sC 2>&1" C-m
+    else
+        tmux send-keys -t "$SESSION:Recon.0" \
+            "echo '[Recon] RustScan starting...'; rustscan -a $TARGET_IP --ulimit 5000 --timeout 3000 --batch-size 500 -- -A -sC -oN '$NMAP_OUT' 2>&1" C-m
     fi
 
-    # Master Terminal is now at a clean Zsh prompt — focus it
-    tmux select-pane -t "$SESSION:Workspace.1"
+    # Split top/bottom — bottom pane gets 40%
+    tmux split-window -v -t "$SESSION:Recon.0" -p 40
+
+    # Pane 1 — FFUF (exact command as specified, with optional save)
+    tmux send-keys -t "$SESSION:Recon.1" "$ENV_EXPORT" C-m
+    if [[ "$VOLATILE" -eq 1 ]]; then
+        tmux send-keys -t "$SESSION:Recon.1" \
+            "echo '[Recon] FFUF starting...'; ffuf -w '$WORDLIST' -u http://$TARGET_IP/FUZZ -s -mc 200,301,302,403" C-m
+    else
+        tmux send-keys -t "$SESSION:Recon.1" \
+            "echo '[Recon] FFUF starting...'; ffuf -w '$WORDLIST' -u http://$TARGET_IP/FUZZ -s -mc 200,301,302,403 -o '$FFUF_OUT' -of csv" C-m
+    fi
 
     # ----------------------------------------------------------
-    # TAB 3 [Writeup] — single pane, nano checklist.md
+    # TAB 2 [Master] — single full-screen interactive Zsh
+    # NO splits. NO background loops. 100% clean user terminal.
+    # ----------------------------------------------------------
+    tmux new-window -t "$SESSION" -n "Master"
+
+    # Export env vars
+    tmux send-keys -t "$SESSION:Master" "$ENV_EXPORT; clear" C-m
+
+    # Simple echo banner — no printf, no escape sequences, no box chars
+    tmux send-keys -t "$SESSION:Master" "echo ''" C-m
+    tmux send-keys -t "$SESSION:Master" "echo 'BOSATEK SENTINEL V3 - MVP MODE'" C-m
+    tmux send-keys -t "$SESSION:Master" "echo ''" C-m
+    tmux send-keys -t "$SESSION:Master" "echo \"  Target : $TARGET_IP\"" C-m
+    tmux send-keys -t "$SESSION:Master" "echo \"  Room   : $ROOM_NAME\"" C-m
+    tmux send-keys -t "$SESSION:Master" "echo \"  Dir    : $ROOM_DIR\"" C-m
+    tmux send-keys -t "$SESSION:Master" "echo ''" C-m
+
+    # Source the sentinel-save function — user can now type 'sentinel-save'
+    tmux send-keys -t "$SESSION:Master" "source '$ROOM_DIR/.sentinel_env.sh'" C-m
+    tmux send-keys -t "$SESSION:Master" "echo '  Commands: sentinel-save'" C-m
+    tmux send-keys -t "$SESSION:Master" "echo ''" C-m
+
+    # ----------------------------------------------------------
+    # TAB 3 [Writeup] — writeup.md in nano
+    # File path: $ENGAGEMENTS_BASE/$ROOM_NAME/writeup.md
     # ----------------------------------------------------------
     tmux new-window -t "$SESSION" -n "Writeup"
-    tmux send-keys -t "$SESSION:Writeup" \
-        "touch '$ROOM_DIR/checklist.md' '$ROOM_DIR/writeup.md'; nano '$ROOM_DIR/checklist.md'" C-m
+    tmux send-keys -t "$SESSION:Writeup" "nano '$WRITEUP_FILE'" C-m
 
     # ----------------------------------------------------------
-    # Land on Tab 2 [Workspace], Master Terminal (right pane)
+    # Land on Tab 2 [Master] — user is at a clean Zsh prompt
     # ----------------------------------------------------------
-    tmux select-window -t "$SESSION:Workspace"
-    tmux select-pane -t "$SESSION:Workspace.1"
+    tmux select-window -t "$SESSION:Master"
     tmux attach-session -t "$SESSION"
 }
 
