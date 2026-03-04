@@ -60,11 +60,11 @@ source ~/.zshrc
 
 ## 📂 Directory Structure
 Sentinel automatically organizes your work for GitHub writeups:
-
+```bash
 ~/Documents/GitHub/Bosanac-Writeups/
 └── [Room_Name]/
     └── [Room_Name].burp  # Auto-saved Burp Project file
-
+```
 ---
 
 ## ⚖️ Disclaimer
