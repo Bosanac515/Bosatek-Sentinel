@@ -26,19 +26,21 @@ Ensure you have the following installed: tmux, rustscan, ffuf, ollama, and Burp 
 
 ### 2. Setup Commands
 Run these in your terminal to initialize the framework:
-
+```bash
 git clone https://github.com/Bosanac515/Bosatek-Sentinel.git
 cd Bosatek-Sentinel
 ollama create sentinel-brain -f Modelfile
 chmod +x sentinel.sh
-
+```
 ---
 
 ## 🎮 Execution
 
 ### How to Run
 Launch the framework from your terminal:
+```bash
 ./sentinel.sh
+```
 
 ### Navigation & Controls
 * Switch Tabs: Click the tab names at the bottom with your mouse, or use Ctrl + b followed by n (Next) or p (Previous).
@@ -49,9 +51,10 @@ Launch the framework from your terminal:
 
 ## ⌨️ Global Alias (Run from anywhere)
 To run Sentinel by just typing 'sentinel' in any directory:
-
+```bash
 echo "alias sentinel='$(pwd)/sentinel.sh'" >> ~/.zshrc
 source ~/.zshrc
+```
 
 ---
 
