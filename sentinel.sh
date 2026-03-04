@@ -53,7 +53,7 @@ tmux send-keys -t sentinel:Burp "/opt/BurpSuitePro/BurpSuitePro --project-file=\
 
 # --- TAB 4: AI BRAIN (OLLAMA) ---
 # Change model name if needed (e.g. mistral, llama3:8b, bosatek-sentinel)
-tmux send-keys -t sentinel:AI_Brain "ollama run llama3" C-m
+tmux send-keys -t sentinel:AI_Brain "ollama run sentinel-brain" C-m
 
 # ATTACH
 tmux select-window -t sentinel:Master
